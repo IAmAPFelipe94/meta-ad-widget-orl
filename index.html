@@ -9,7 +9,7 @@
     .report-header { text-align: center; margin-bottom: 12px; }
     .report-header h1 { font-size: 18px; font-weight: bold; color: #000; margin: 0 0 2px 0; }
     .report-date { font-size: 11px; color: #666; font-style: italic; margin: 0; }
-    .date-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; padding: 10px; background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 6px; }
+    .date-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; padding: 10px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; }
     .date-controls label { font-size: 13px; color: #374151; font-weight: 600; }
     .date-controls select { padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; color: #374151; background: #fff; cursor: pointer; }
     .date-range-inputs { display: flex; align-items: center; gap: 6px; }
@@ -19,10 +19,13 @@
     .apply-btn:hover { background: #1d4ed8; }
     .table-responsive { overflow-x: auto; border: 1px solid #d1d5db; }
     table { width: 100%; border-collapse: collapse; background: #fff; }
-    th { background: #f8fafc; color: #374151; font-weight: bold; font-size: 13px; padding: 7px 10px; border: 1px solid #d1d5db; text-align: center; }
+    th { background: #2563eb; color: #fff; font-weight: bold; font-size: 13px; padding: 7px 10px; border: 1px solid #1d4ed8; text-align: center; }
     td { padding: 6px 10px; border: 1px solid #e5e7eb; font-size: 13px; color: #000; text-align: center; white-space: nowrap; }
+    tr:nth-child(even) td { background: #eff6ff; }
     .loading { color: #9ca3af; padding: 20px; text-align: center; }
     .error { color: #ef4444; padding: 20px; text-align: center; }
+    .cold { color: #6b7280; }
+    .won-note { font-size: 11px; color: #6b7280; font-style: italic; margin-top: 6px; text-align: right; }
   </style>
 </head>
 <body>
@@ -56,24 +59,26 @@
           <tr>
             <th>Campaign</th>
             <th>Ad</th>
-            <th>Conversion</th>
+            <th>Conversions</th>
             <th>CPC</th>
             <th>Total Spend</th>
             <th>Won</th>
             <th>Value</th>
             <th>ROAS</th>
+            <th>Cold Leads</th>
           </tr>
         </thead>
         <tbody id="report-body">
-          <tr><td colspan="8" class="loading">Loading...</td></tr>
+          <tr><td colspan="9" class="loading">Loading...</td></tr>
         </tbody>
       </table>
     </div>
+    <p class="won-note">Won / Value / Cold Leads reflect leads acquired within the selected date range.</p>
   </div>
 
   <script>
     const PROXY_URL = "https://ghl-proxy-orl.apfelipe94.workers.dev";
-    let allData = []; // One row per contact
+    let allData = [];
 
     function fmt(d) { return d.toISOString().split("T")[0]; }
 
@@ -123,15 +128,13 @@
     function renderTable(startDate, endDate) {
       const tbody = document.getElementById("report-body");
 
-      // Filter contacts by dateAdded within selected range
-      // Won data is ALL-TIME for those contacts (not filtered by date)
       const filtered = allData.filter(r => {
         const d = (r.date || "").trim();
         return d >= startDate && d <= endDate;
       });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="loading">No leads found for selected period.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="loading">No leads found for selected period.</td></tr>';
         return;
       }
 
@@ -139,38 +142,29 @@
       const adMap = {};
       filtered.forEach(r => {
         const key = `${r.campaign}||${r.ad}`;
-        if (!adMap[key]) {
-          adMap[key] = {
-            campaign: r.campaign,
-            ad: r.ad,
-            conversions: 0,
-            totalSpend: 0,
-            won: 0,
-            value: 0
-          };
-        }
-        const conv  = parseNum(r.conversion);
-        const cpc   = parseNum(r.cpc);
-        const won   = parseNum(r.won);
-        const value = parseNum(r.value);
+        if (!adMap[key]) adMap[key] = { campaign: r.campaign, ad: r.ad,
+          conversions: 0, totalSpend: 0, won: 0, value: 0, cold: 0 };
 
+        const conv = parseNum(r.conversion);
+        const cpc  = parseNum(r.cpc);
         adMap[key].conversions += conv;
         adMap[key].totalSpend  += conv * cpc;
-        adMap[key].won         += won;
-        adMap[key].value       += value;
+        adMap[key].won         += parseNum(r.won);
+        adMap[key].value       += parseNum(r.value);
+        adMap[key].cold        += parseNum(r.cold);
       });
 
       const rows = Object.values(adMap)
         .map(r => ({
           ...r,
           cpc:  r.conversions > 0 ? r.totalSpend / r.conversions : 0,
-          roas: r.totalSpend > 0 ? r.value / r.totalSpend : 0
+          roas: r.totalSpend  > 0 ? r.value / r.totalSpend       : 0
         }))
-        .filter(r => r.conversions > 0 || r.value > 0)
+        .filter(r => r.conversions > 0 || r.value > 0 || r.cold > 0)
         .sort((a, b) => b.value !== a.value ? b.value - a.value : b.conversions - a.conversions);
 
       if (rows.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" class="loading">No active ads for selected period.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="loading">No active ads for selected period.</td></tr>';
         return;
       }
 
@@ -183,21 +177,18 @@
           <td>$${r.totalSpend.toFixed(2)}</td>
           <td>${r.won}</td>
           <td>$${r.value.toLocaleString("en-US", {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-          <td>${r.roas.toFixed(2)}</td>
+          <td>${r.roas > 0 ? r.roas.toFixed(2) : "—"}</td>
+          <td class="cold">${r.cold > 0 ? r.cold : "—"}</td>
         </tr>
       `).join("");
     }
 
-    // Load all contact data once, filter client-side
     fetch(`${PROXY_URL}/?endpoint=sheet`)
       .then(res => res.json())
-      .then(json => {
-        allData = json.data || [];
-        applyDateRange();
-      })
+      .then(json => { allData = json.data || []; applyDateRange(); })
       .catch(() => {
         document.getElementById("report-body").innerHTML =
-          '<tr><td colspan="8" class="error">Failed to load data.</td></tr>';
+          '<tr><td colspan="9" class="error">Failed to load data.</td></tr>';
       });
   </script>
 </body>
